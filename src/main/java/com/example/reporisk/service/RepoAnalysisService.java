@@ -19,22 +19,15 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * Service that analyzes a local Git repository using JGit and Eclipse JDT.
- * - Traverses commits up to maxCommits
- * - Collects file modification counts, churn lines, contributor counts
- * - Parses Java files with JDT AST to extract simple structural metrics
- * - Computes a combined risk score per file (heuristic)
- */
 @Service
 public class RepoAnalysisService {
 
-    /**
-     * Analyze repository at the given path.
-     *
-     * @param request request with repoPath and maxCommits
-     * @return aggregated analysis
-     */
+    private final LlmService llmService;
+
+    public RepoAnalysisService(LlmService llmService) {
+        this.llmService = llmService;
+    }
+
     public AnalysisResponse analyzeRepository(AnalysisRequest request) throws Exception {
         validateRequest(request);
 
@@ -43,7 +36,6 @@ public class RepoAnalysisService {
             throw new IllegalArgumentException("Repository path does not exist: " + repoPath);
         }
 
-        // Try to open a Git repository at the path
         try (Repository repository = openRepository(repoPath)) {
             if (repository == null) {
                 throw new IllegalArgumentException("No git repository found at: " + repoPath);
@@ -56,14 +48,11 @@ public class RepoAnalysisService {
             int commitsAnalyzed = traverseCommits(repository, request.getMaxCommits(),
                     fileModificationCounts, fileChurnLines, fileContributors);
 
-            // For each file, if Java file, compute AST metrics
             Map<String, Double> fileAstScores = new HashMap<>();
             for (String filePath : fileModificationCounts.keySet()) {
                 if (filePath.endsWith(".java")) {
                     Path absoluteFile = repoPath.resolve(filePath);
-                    // File may not exist in working tree if it was deleted in history; try to find current file
                     if (!Files.exists(absoluteFile)) {
-                        // skip if not present in working copy
                         continue;
                     }
                     try {
@@ -71,13 +60,11 @@ public class RepoAnalysisService {
                         double astScore = computeAstSizeScore(source);
                         fileAstScores.put(filePath, astScore);
                     } catch (IOException e) {
-                        // If file can't be read, skip AST scoring for it
                         e.printStackTrace();
                     }
                 }
             }
 
-            // Compose FileRisk entries
             List<FileRisk> fileRisks = new ArrayList<>();
             for (String filePath : fileModificationCounts.keySet()) {
                 int mods = fileModificationCounts.getOrDefault(filePath, 0);
@@ -90,11 +77,25 @@ public class RepoAnalysisService {
                 fileRisks.add(fr);
             }
 
-            // Sort by risk descending
             fileRisks.sort(Comparator.comparingDouble(FileRisk::getRiskScore).reversed());
 
-            // Generate simple AI-like insights (heuristic rules)
-            List<String> insights = generateInsights(fileRisks);
+            List<String> insights;
+            if (llmService != null && llmService.isEnabled()) {
+                List<FileRisk> top = fileRisks.stream().limit(10).collect(Collectors.toList());
+                List<String> llmInsights = Collections.emptyList();
+                try {
+                    llmInsights = llmService.generateInsights(top);
+                } catch (Exception e) {
+                    // fall back to heuristic insights on any LLM failure
+                }
+                if (llmInsights == null || llmInsights.isEmpty()) {
+                    insights = generateInsights(fileRisks);
+                } else {
+                    insights = llmInsights;
+                }
+            } else {
+                insights = generateInsights(fileRisks);
+            }
 
             AnalysisResponse response = new AnalysisResponse(repoPath.toString(), commitsAnalyzed, fileRisks, insights);
             return response;
@@ -114,7 +115,6 @@ public class RepoAnalysisService {
     }
 
     private Repository openRepository(Path repoPath) throws IOException {
-        // Try as a bare repo or normal git folder
         FileRepositoryBuilder builder = new FileRepositoryBuilder();
         builder.setWorkTree(repoPath.toFile());
         builder.findGitDir(repoPath.toFile());
@@ -127,7 +127,6 @@ public class RepoAnalysisService {
             }
             return repository;
         } catch (IOException e) {
-            // try alternative: repoPath/.git
             Path gitDir = repoPath.resolve(".git");
             if (Files.exists(gitDir)) {
                 builder.setGitDir(gitDir.toFile());
@@ -155,17 +154,12 @@ public class RepoAnalysisService {
             for (RevCommit commit : walk) {
                 if (count >= maxCommits) break;
                 if (commit.getParentCount() == 0) {
-                    // initial commit: diff against empty tree
                     analyzeDiff(repository, null, commit, fileModificationCounts, fileChurnLines, fileContributors);
                 } else {
                     for (RevCommit parent : commit.getParents()) {
                         analyzeDiff(repository, parent, commit, fileModificationCounts, fileChurnLines, fileContributors);
                     }
                 }
-                // record contributor for touched files
-                String author = commit.getAuthorIdent() != null ? commit.getAuthorIdent().getEmailAddress() : commit.getAuthorIdent().getName();
-                if (author == null) author = "unknown";
-                // Contributors tracked inside analyzeDiff
 
                 count++;
             }
@@ -191,7 +185,6 @@ public class RepoAnalysisService {
                     newTreeIter.reset(reader, commit.getTree());
                 }
             } else {
-                // initial commit: empty old tree
                 try (ObjectReader reader = repository.newObjectReader()) {
                     newTreeIter.reset(reader, commit.getTree());
                 }
@@ -211,27 +204,22 @@ public class RepoAnalysisService {
                 }
                 if (path == null || path.equals(DiffEntry.DEV_NULL)) continue;
 
-                // increment modification count
                 fileModificationCounts.put(path, fileModificationCounts.getOrDefault(path, 0) + 1);
 
-                // attempt to compute churn (lines added + removed) from the edit list
                 int churn = computeChurnForDiffEntry(df, entry);
                 fileChurnLines.put(path, fileChurnLines.getOrDefault(path, 0) + churn);
 
-                // contributor set
                 String author = commit.getAuthorIdent() != null ? commit.getAuthorIdent().getEmailAddress() : commit.getAuthorIdent().getName();
                 if (author == null) author = "unknown";
                 fileContributors.computeIfAbsent(path, k -> new HashSet<>()).add(author);
             }
         } catch (Exception e) {
-            // Non-fatal — continue analysis for other commits
             e.printStackTrace();
         }
     }
 
     private int computeChurnForDiffEntry(DiffFormatter df, DiffEntry entry) {
         try {
-            // produce edit list for entry
             FileHeader fh = df.toFileHeader(entry);
             int churn = 0;
             for (Edit edit : fh.toEditList()) {
@@ -244,11 +232,6 @@ public class RepoAnalysisService {
         }
     }
 
-    /**
-     * Compute a simple AST-based "size" score:
-     * - larger classes, longer methods, and methods with many parameters increase score.
-     * - score normalized to [0, 10] range heuristically.
-     */
     private double computeAstSizeScore(String source) {
         try {
             ASTParser parser = ASTParser.newParser(AST.JLS8);
@@ -262,14 +245,12 @@ public class RepoAnalysisService {
             AstMetricsVisitor visitor = new AstMetricsVisitor();
             cu.accept(visitor);
 
-            // Heuristic combination
             double classScore = Math.log1p(visitor.getTotalClassLines()) / 5.0;
             double methodCountScore = Math.log1p(visitor.getMethodCount()) / 3.0;
             double longMethodScore = Math.log1p(visitor.getLongMethodCount()) / 2.0;
             double paramScore = Math.log1p(visitor.getTotalParameters()) / 4.0;
 
             double raw = classScore + methodCountScore + longMethodScore + paramScore;
-            // map to 0-10
             double mapped = Math.min(10.0, raw * 2.0);
             return round(mapped, 3);
         } catch (Exception e) {
@@ -277,29 +258,18 @@ public class RepoAnalysisService {
         }
     }
 
-    /**
-     * Compute a combined risk score using heuristic weights:
-     * - modifications: more modifications -> higher risk
-     * - contributors: more contributors -> higher risk (coordination)
-     * - churn lines: more churn -> higher risk
-     * - astScore: larger/more complex code -> higher risk
-     *
-     * Final score normalized to 0..10
-     */
     private double computeCombinedRisk(int modifications, int contributors, int churnLines, double astScore) {
         double wMods = 0.35;
         double wContrib = 0.2;
         double wChurn = 0.25;
         double wAst = 0.2;
 
-        // Normalize inputs heuristically
-        double normMods = Math.log1p(modifications) / Math.log1p(50); // assumes 50 modifications is big
+        double normMods = Math.log1p(modifications) / Math.log1p(50);
         double normContrib = Math.log1p(contributors) / Math.log1p(20);
-        double normChurn = Math.log1p(churnLines) / Math.log1p(1000); // 1000 churn lines big
+        double normChurn = Math.log1p(churnLines) / Math.log1p(1000);
         double normAst = astScore / 10.0;
 
         double score = (wMods * normMods + wContrib * normContrib + wChurn * normChurn + wAst * normAst) * 10.0;
-        // Clamp
         score = Math.max(0.0, Math.min(10.0, score));
         return score;
     }
@@ -311,7 +281,6 @@ public class RepoAnalysisService {
             return insights;
         }
 
-        // Top risky files
         List<FileRisk> top = fileRisks.stream().limit(5).collect(Collectors.toList());
         insights.add("Top risky files:");
         for (FileRisk fr : top) {
@@ -319,7 +288,6 @@ public class RepoAnalysisService {
                     fr.getPath(), fr.getRiskScore(), fr.getModifications(), fr.getContributors(), fr.getChurnLines(), fr.getAstSizeScore()));
         }
 
-        // Detect hotspots with high churn and many contributors
         List<FileRisk> hotspots = fileRisks.stream()
                 .filter(f -> f.getChurnLines() > 200 && f.getContributors() > 2)
                 .collect(Collectors.toList());
@@ -332,7 +300,6 @@ public class RepoAnalysisService {
             insights.add("No high-churn hotspots with many contributors were detected.");
         }
 
-        // Suggest files with large AST score
         List<FileRisk> largeAst = fileRisks.stream()
                 .filter(f -> f.getAstSizeScore() >= 6.0)
                 .collect(Collectors.toList());
@@ -343,7 +310,6 @@ public class RepoAnalysisService {
             }
         }
 
-        // Simple recommendation
         insights.add("Recommendations:");
         insights.add("  - Prioritize top risky files for code review and targeted testing.");
         insights.add("  - Consider refactoring files with high AST complexity and high churn.");
@@ -357,9 +323,6 @@ public class RepoAnalysisService {
         return Math.round(v * factor) / factor;
     }
 
-    /**
-     * Visitor to collect simple AST metrics.
-     */
     private static class AstMetricsVisitor extends ASTVisitor {
         private int totalClassLines = 0;
         private int methodCount = 0;
@@ -385,11 +348,9 @@ public class RepoAnalysisService {
         }
 
         private int estimateLines(ASTNode node) {
-            // Approximate lines by counting newlines in the source segment if available
             try {
-                // ASTNode doesn't expose source directly here; use length as heuristic
                 int length = node.getLength();
-                int approx = Math.max(1, length / 60); // crude approximation
+                int approx = Math.max(1, length / 60);
                 return approx;
             } catch (Exception e) {
                 return 1;
