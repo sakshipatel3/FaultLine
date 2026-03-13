@@ -1,9 +1,9 @@
 {
   "name": "repo-risk-analyzer-frontend",
   "version": "0.0.1",
-  "description": "Placeholder Angular frontend (static placeholder). Use backend API directly or replace with a full Angular app.",
+  "description": "Placeholder Angular frontend",
   "scripts": {
-    "start": "echo \"Frontend is a placeholder. Use backend API directly.\" && exit 0"
+    "start": "echo \"Frontend"
   },
   "dependencies": {},
   "devDependencies": {}
