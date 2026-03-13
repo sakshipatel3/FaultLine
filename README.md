@@ -1,143 +1,42 @@
-# Repo Risk Analyzer (Backend)
+### 🎉 Repo Risk Analyzer — Quick & Fun README
 
-A Java Spring Boot application that analyzes Git repositories to identify high-risk files and technical debt hotspots. It leverages JGit for commit traversal and diff analysis and Eclipse JDT for AST parsing of Java source files to extract structural metrics.
+<div>
+  <img src="https://img.shields.io/badge/build-passing-brightgreen" alt="build"/>
+  <img src="https://img.shields.io/badge/Java-17-brightgreen" alt="Java"/>
+  <img src="https://img.shields.io/badge/Spring%20Boot-3.x-6DB33F?logo=spring" alt="Spring Boot"/>
+  <img src="https://img.shields.io/badge/Angular-15-red?logo=angular" alt="Angular"/>
+  <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker" alt="Docker"/>
+  <img src="https://img.shields.io/badge/LLM-ready-purple" alt="LLM"/>
+</div>
 
-Features
-- Traverse repository commit history using JGit
-- Compute churn (lines added/removed), modification counts, and contributor counts per file
-- Parse Java files via Eclipse JDT to estimate class/method size and parameter complexity
-- Heuristic risk scoring combining repository analytics and AST-derived metrics
-- REST API to trigger analysis for a local repository path
-- Simple, readable JSON output including AI-like insights (heuristic-generated)
+## ✨ What it is
+A fun, fast startup to analyze Git repositories for risk: combines commit churn (JGit) + Java AST metrics (Eclipse JDT) to highlight high‑risk files and generate AI-assisted engineering insights.
 
-Prerequisites
-- Java 11 (OpenJDK / Temurin)
-- Maven 3.6+
-- Git (for initializing sample repo)
-- (Optional) Docker and docker-compose if you want to run using containers
+## 🚀 Tech snapshot (one line)
+**Java, Spring Boot, JGit, Eclipse JDT, LLM integration, JPA/H2, OpenAPI, Angular, Docker**
 
-Installation steps
+## 🎯 Key highlights
+- **Risk fusion**: churn + AST → single 0–100 score  
+- **AI insights**: configurable prompt → actionable recommendations  
+- **Async jobs**: background analysis + SSE progress updates  
+- **Demo-ready**: `H2` + sample repo included
 
-1. Clone this project or extract the ZIP to a directory.
+## 🎨 Visuals — risk legend
+<div>
+  <span style="display:inline-block;padding:6px 10px;border-radius:4px;background:#4caf50;color:#fff;margin-right:6px;">LOW</span>
+  <span style="display:inline-block;padding:6px 10px;border-radius:4px;background:#ffeb3b;color:#000;margin-right:6px;">MEDIUM</span>
+  <span style="display:inline-block;padding:6px 10px;border-radius:4px;background:#f44336;color:#fff;">HIGH</span>
+</div>
 
-2. Initialize the demo repository to have a test repo to analyze:
-    cd sample-repos/demo-repo
-    bash init-repo.sh
-
-3. Build the backend application with Maven:
-    cd <project-root>
-    mvn -B -DskipTests package
-
-   The build will produce:
-    target/repo-risk-analyzer-backend.jar
-
-Configuration
-
-- Environment variables
-    - REPO_PATH (optional) : path to a repository you might want to analyze by default (not required)
-    - LLM_API_KEY, LLM_API_URL : placeholders if you plan to integrate an LLM later
-
-- .env.example is included with example keys.
-
-How to run the application
-
-- Locally with Java:
-    java -jar target/repo-risk-analyzer-backend.jar
-
-- Using Make:
-    make run
-
-- Using Docker:
-    (1) Build the jar as above: mvn -B -DskipTests package
-    (2) Build the image:
-        docker build -t repo-risk-analyzer-backend .
-    (3) Run:
-        docker run -p 8080:8080 --rm repo-risk-analyzer-backend
-
-- Using docker-compose:
-    docker-compose up --build
-
-API Usage
-
-- Health check:
-    GET http://localhost:8080/api/health
-
-- Analyze a repository (POST):
-    POST http://localhost:8080/api/analyze
-    Content-Type: application/json
-
-    Body example:
-    {
-        "repoPath": "/absolute/path/to/sample-repos/demo-repo",
-        "maxCommits": 1000
-    }
-
-Response example (abridged):
-    {
-        "repositoryPath": "/abs/path/to/repo",
-        "commitsAnalyzed": 4,
-        "fileRisks": [
-            {
-                "path": "src/main/java/com/example/demo/Complex.java",
-                "modifications": 1,
-                "contributors": 1,
-                "churnLines": 0,
-                "astSizeScore": 6.5,
-                "riskScore": 2.345
-            },
-            ...
-        ],
-        "insights": [
-            "Top risky files:",
-            "  - src/main/java/com/example/demo/Complex.java (risk=2.345, mods=1, contributors=1, churn=0, ast=6.500)",
-            ...
-        ]
-    }
-
-Notes on heuristics and limitations
-- The AST-based metrics are heuristic and intentionally lightweight. They approximate class/method sizes and complexity.
-- The risk scoring is a simple weighted combination designed to be understandable and extendable.
-- The service reads the working tree files when computing AST metrics; files deleted in the current working tree are skipped for AST scoring.
-- This backend does not persist results; it's a stateless analysis endpoint that returns JSON.
-- There is a placeholder for LLM/Generative AI integration; currently, "insights" are generated by deterministic heuristics. You can integrate an LLM by calling an external API inside RepoAnalysisService.generateInsights.
-
-Project structure
-- pom.xml - Maven dependencies and build configuration
-- src/main/java/com/example/reporisk - Java source code
-  - controller - REST controllers
-  - model - DTOs used by API
-  - service - Analysis logic using JGit and Eclipse JDT
-- src/main/resources - Spring Boot configuration
-- sample-repos/demo-repo - Demo Git repository with sample Java files and init script
-- Dockerfile, docker-compose.yml - containerization
-- Makefile - convenience tasks
-- README.md - this file
-
-Troubleshooting
-
-- "No git repository found" error:
-  Ensure you passed the correct absolute path to an initialized Git repository. For the demo repo:
-      $(pwd)/sample-repos/demo-repo
-
-- JDT parse errors / encoding issues:
-  Ensure Java source files are UTF-8 encoded. If parsing fails for a file, the analyzer will skip AST scoring for that file.
-
-- Large repositories:
-  Consider lowering maxCommits when calling the API to reduce memory and runtime.
-
-- Port conflicts:
-  The app listens on port 8080 by default. Change server.port in src/main/resources/application.properties or set SPRING_APPLICATION_JSON to override.
-
-Extending the project
-- Persist results into a database (Postgres, MongoDB)
-- Add authentication and an RBAC model
-- Integrate a remote LLM provider to generate richer AI-assisted insights (OpenAI, Anthropic, Llama 2 via hosted API)
-- Build a frontend dashboard (Angular, React) to visualize hotspots and risk trends over time
-
-If you want, I can:
-- Add persistent storage and scheduled analyses
-- Integrate a real LLM provider with environment-driven configuration
-- Provide a full Angular frontend with charts and interactive filtering
-
-License
-This project is provided as-is for demonstration purposes.
+## ⚡ Quickstart (super short)
+1. Initialize demo repo:
+   - `cd sample-repos/demo-repo && bash init-repo.sh`
+2. Run backend:
+   - `cd backend && mvn clean package && java -jar target/repo-risk-analyzer-backend-0.1.0.jar`
+3. (Optional) Frontend dev:
+   - `cd frontend && npm install && npm start`
+4. Analyze sample (curl):
+```bash
+curl -X POST http://localhost:8080/api/projects/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"repoUrl":"file:///ABS/PATH/sample-repos/demo-repo","branch":"main","depth":100}'
