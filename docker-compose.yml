@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+  backend:
+    build: .
+    image: repo-risk-analyzer-backend:latest
+    container_name: repo-risk-analyzer-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+    volumes:
+      - ./:/workspace:cached
