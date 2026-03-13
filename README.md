@@ -44,10 +44,3 @@ FaultLine calculates a **Risk Score (0-100)** by analyzing two distinct data dim
 | 🟡 **MEDIUM** | Moderate churn or rising complexity. | Monitor for debt. |
 | 🔴 **HIGH** | "The FaultLine"—Frequent changes + Messy logic. | **Refactor ASAP.** |
 
----
-
-## ⚡ Quickstart (Demo Mode)
-
-1️⃣ **Initialize Demo Repo:**
-```bash
-cd sample-repos/demo-repo && bash init-repo.sh
