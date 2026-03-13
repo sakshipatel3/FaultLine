@@ -1,4 +1,6 @@
-### 🎉 Repo Risk Analyzer — Quick & Fun README
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:6a11cb,100:2575fc&height=200&section=header&text=FaultLine&fontSize=45&fontColor=ffffff"/>
+</p>
 
 <div>
   <img src="https://img.shields.io/badge/build-passing-brightgreen" alt="build"/>
