@@ -88,17 +88,17 @@ java -jar target/repo-risk-analyzer-backend.jar
 - Backend runs at **http://localhost:8080**.
 - Optional: open **http://localhost:8080/api/health** and **http://localhost:8080/api/health/llm** in a browser to confirm the server and (if configured) LLM are OK.
 
-### Step 4: Run the frontend
+### Step 4: Run the frontend (Angular)
 
-Open a **new terminal**, go to the frontend folder, install dependencies, and start the dev server:
+Open a **new terminal**, go to the frontend folder, install dependencies, and start the Angular dev server:
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm start
 ```
 
-- When Vite is ready, open **http://localhost:5173** in your browser.
+- When the Angular CLI is ready, open **http://localhost:4200** in your browser.
 
 ### Step 5: Use the app
 
@@ -128,7 +128,7 @@ docker-compose build
 docker-compose up
 ```
 
-This exposes the backend on `http://localhost:8080`. You still need to run the frontend separately (Step 4 above) and point it at the backend.
+This exposes the backend on `http://localhost:8080`. You still need to run the Angular frontend separately (Step 4 above); it runs on **http://localhost:4200** and talks to the backend.
 
 ---
 

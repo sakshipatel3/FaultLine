@@ -17,7 +17,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 @Validated
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"}, allowCredentials = "false")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:4200", "http://localhost:5173"}, allowCredentials = "false")
 public class RepoAnalysisController {
 
     private final RepoAnalysisService service;

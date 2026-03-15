@@ -1,0 +1,193 @@
+<div class="app-root">
+  <header class="app-header">
+    <div>
+      <h1>FaultLine</h1>
+      <p class="subtitle">
+        Seismic Sensor for your Java repositories – detect hidden technical
+        debt before it erupts.
+      </p>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="panel">
+      <h2>Analyze a repository</h2>
+      <p class="panel-helper">
+        Paste a public Git URL (for example
+        <span class="mono">https://github.com/ataraxie/codeshovel.git</span>
+        ) or point to a local Git repository path. FaultLine will clone or
+        read it, then compute a 0–10 risk score that merges commit churn
+        with structural complexity.
+      </p>
+      <form class="form" (ngSubmit)="onSubmit()" #form="ngForm">
+        <label class="field">
+          <span>Repository URL or path</span>
+          <input
+            type="text"
+            placeholder="https://github.com/ataraxie/codeshovel.git"
+            [(ngModel)]="repoPath"
+            name="repoPath"
+            required
+          />
+        </label>
+        <label class="field inline">
+          <span>Max commits to analyze</span>
+          <input
+            type="number"
+            min="1"
+            max="5000"
+            [(ngModel)]="maxCommits"
+            name="maxCommits"
+          />
+        </label>
+        <button type="submit" [disabled]="loading || !repoPath">
+          {{ loading ? 'Analyzing…' : 'Run analysis' }}
+        </button>
+      </form>
+      <div class="error-banner" *ngIf="error">{{ error }}</div>
+    </section>
+
+    <section class="results" *ngIf="data && reportStats">
+        <div class="results-header">
+          <div>
+            <h2>Seismic Risk Dashboard</h2>
+            <p class="muted">
+              {{ data.repositoryPath }} • {{ data.commitsAnalyzed }} commits analyzed
+            </p>
+          </div>
+          <div class="legend">
+            <span class="pill pill-low">🟢 Low</span>
+            <span class="pill pill-medium">🟡 Medium</span>
+            <span class="pill pill-high">🔴 High</span>
+          </div>
+        </div>
+
+        <div class="report-dashboard">
+          <div class="report-card overall">
+            <div class="report-card-title">Avg risk (0–10)</div>
+            <div class="round-bar">
+              <div class="round-bar-fill" [style.--p]="reportStats.overallPct"></div>
+              <div class="round-bar-inner"></div>
+              <span class="round-bar-value">{{ reportStats.avgRisk | number:'1.1-1' }}</span>
+            </div>
+            <div class="report-card-label">across {{ reportStats.fileCount }} files</div>
+          </div>
+          <div class="report-card low">
+            <div class="report-card-title">Low risk</div>
+            <div class="round-bar">
+              <div class="round-bar-fill" [style.--p]="reportStats.lowPct"></div>
+              <div class="round-bar-inner"></div>
+              <span class="round-bar-value">{{ reportStats.lowCount }}</span>
+            </div>
+            <div class="report-card-label">files</div>
+          </div>
+          <div class="report-card medium">
+            <div class="report-card-title">Medium risk</div>
+            <div class="round-bar">
+              <div class="round-bar-fill" [style.--p]="reportStats.medPct"></div>
+              <div class="round-bar-inner"></div>
+              <span class="round-bar-value">{{ reportStats.medCount }}</span>
+            </div>
+            <div class="report-card-label">files</div>
+          </div>
+          <div class="report-card high">
+            <div class="report-card-title">High risk</div>
+            <div class="round-bar">
+              <div class="round-bar-fill" [style.--p]="reportStats.highPct"></div>
+              <div class="round-bar-inner"></div>
+              <span class="round-bar-value">{{ reportStats.highCount }}</span>
+            </div>
+            <div class="report-card-label">refactor soon</div>
+          </div>
+          <div class="report-card">
+            <div class="report-card-title">Peak risk</div>
+            <div class="round-bar">
+              <div
+                class="round-bar-fill"
+                [style.--p]="(reportStats.maxRisk / 10) * 100"
+                style="--bar-color: var(--danger)"
+              ></div>
+              <div class="round-bar-inner"></div>
+              <span class="round-bar-value">{{ reportStats.maxRisk | number:'1.1-1' }}</span>
+            </div>
+            <div class="report-card-label">max score</div>
+          </div>
+        </div>
+
+        <div class="layout-two-col">
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Risk</th>
+                  <th>Mods</th>
+                  <th>Contributors</th>
+                  <th>Churn</th>
+                  <th>AST score</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  *ngFor="let f of data.fileRisks; trackBy: trackByPath"
+                  [class]="riskLevel(f.riskScore) + (selectedFile?.path === f.path ? ' selected' : '') + ' clickable'"
+                  (click)="onFileClick(f)"
+                  (keydown.enter)="onFileClick(f)"
+                  tabindex="0"
+                  role="button"
+                >
+                  <td class="mono">{{ f.path }}</td>
+                  <td>{{ f.riskScore | number:'1.2-2' }}</td>
+                  <td>{{ f.modifications }}</td>
+                  <td>{{ f.contributors }}</td>
+                  <td>{{ f.churnLines }}</td>
+                  <td>{{ f.astSizeScore | number:'1.2-2' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="insights">
+            <h3>Insights</h3>
+            <p class="muted" *ngIf="!selectedFile && data.insights.length === 0">No insights generated. Try increasing the commit window.</p>
+            <ul *ngIf="!selectedFile && data.insights.length > 0">
+              <li *ngFor="let line of data.insights">{{ line }}</li>
+            </ul>
+            <div class="file-fix-panel" *ngIf="selectedFile">
+                <h4 class="file-fix-title">
+                  Steps to fix: <span class="mono">{{ selectedFile.path }}</span>
+                </h4>
+                <button type="button" class="back-link" (click)="backToInsights()">
+                  ← Back to insights
+                </button>
+                <p class="muted" *ngIf="loadingSteps">Asking AI for steps…</p>
+                <div class="steps-error-box" *ngIf="stepsError">
+                  <p class="steps-error">{{ stepsError }}</p>
+                  <p class="steps-error-hint" *ngIf="stepsError && stepsError.toLowerCase().includes('not configured')">
+                    In the project root (folder with <code>pom.xml</code>), edit
+                    <code>.env</code> and set <code>LLM_API_KEY</code> to your real API key
+                    (get one at platform.openai.com/api-keys). Keep
+                    <code>LLM_API_URL=https://api.openai.com/v1/chat/completions</code>.
+                    Restart the backend after saving.
+                  </p>
+                  <p class="steps-error-hint" *ngIf="stepsError && (stepsError.includes('429') || stepsError.toLowerCase().includes('quota'))">
+                    <strong>Quota / billing:</strong> Add a payment method or upgrade your plan at
+                    <a href="https://platform.openai.com/account/billing" target="_blank" rel="noopener noreferrer">platform.openai.com/account/billing</a>.
+                    Free-tier limits reset over time; see
+                    <a href="https://platform.openai.com/docs/guides/error-codes/api-errors" target="_blank" rel="noopener noreferrer">API errors</a>.
+                  </p>
+                </div>
+                <ol class="fix-steps" *ngIf="!loadingSteps && !stepsError && fileSteps.length > 0">
+                  <li *ngFor="let step of fileSteps">{{ stripStepNumber(step) }}</li>
+                </ol>
+                <p class="muted" *ngIf="!loadingSteps && !stepsError && fileSteps.length === 0">No steps returned. Check that LLM is configured.</p>
+            </div>
+          </div>
+        </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Backend: Spring Boot on :8080 • Frontend: Angular on :4200</span>
+  </footer>
+</div>
