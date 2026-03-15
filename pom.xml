@@ -16,10 +16,18 @@
     <properties>
         <java.version>11</java.version>
         <spring.boot.version>2.7.12</spring.boot.version>
-        <jgit.version>6.7.0.202309070854-r</jgit.version>
+        <jgit.version>6.5.0.202305301015-r</jgit.version>
         <eclipse.jdt.version>3.30.0</eclipse.jdt.version>
         <maven.compiler.plugin.version>3.8.1</maven.compiler.plugin.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>eclipse-repo</id>
+            <name>Eclipse Repository</name>
+            <url>https://repo.eclipse.org/content/groups/releases/</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <!-- Spring Boot -->
@@ -37,7 +45,7 @@
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit</artifactId>
-            <version>${jgit.version}</version>
+            <version>5.13.3</version>
         </dependency>
 
         <!-- Eclipse JDT Core for AST parsing -->
@@ -51,6 +59,7 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+            <version>2.14.2</version>
         </dependency>
 
         <!-- Validation -->
@@ -64,6 +73,7 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
         </dependency>
 
         <!-- For unit testing if needed -->
