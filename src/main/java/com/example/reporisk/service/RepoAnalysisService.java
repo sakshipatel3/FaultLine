@@ -7,9 +7,16 @@ import org.eclipse.jdt.core.dom.*;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.lib.*;
-import org.eclipse.jgit.revwalk.*;
+import org.eclipse.jgit.diff.Edit;
+import org.eclipse.jgit.patch.FileHeader;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectReader;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.springframework.stereotype.Service;
 
@@ -31,9 +38,46 @@ public class RepoAnalysisService {
     public AnalysisResponse analyzeRepository(AnalysisRequest request) throws Exception {
         validateRequest(request);
 
-        Path repoPath = Paths.get(request.getRepoPath()).toAbsolutePath().normalize();
-        if (!Files.exists(repoPath)) {
-            throw new IllegalArgumentException("Repository path does not exist: " + repoPath);
+        String input = request.getRepoPath().trim();
+        Path repoPath;
+        Path tempClonePath = null;
+
+        boolean looksLikeRemote =
+                input.contains("://") ||
+                input.startsWith("git@") ||
+                input.contains("github.com") ||
+                input.endsWith(".git");
+
+        if (looksLikeRemote) {
+            // Treat as remote Git URL and clone to a temporary directory
+            tempClonePath = Files.createTempDirectory("faultline-clone-");
+            try (Git ignored = Git.cloneRepository()
+                    .setURI(input)
+                    .setDirectory(tempClonePath.toFile())
+                    .setCloneAllBranches(true)
+                    .call()) {
+                // clone completed
+            }
+            repoPath = tempClonePath.toAbsolutePath().normalize();
+        } else {
+            // Treat as local filesystem path; if that fails, fall back to trying a remote clone
+            repoPath = Paths.get(input).toAbsolutePath().normalize();
+            if (!Files.exists(repoPath)) {
+                // If it looks even vaguely like a URL, attempt a clone before failing
+                if (input.startsWith("http") || input.contains("github.com")) {
+                    tempClonePath = Files.createTempDirectory("faultline-clone-");
+                    try (Git ignored = Git.cloneRepository()
+                            .setURI(input)
+                            .setDirectory(tempClonePath.toFile())
+                            .setCloneAllBranches(true)
+                            .call()) {
+                        // clone completed
+                    }
+                    repoPath = tempClonePath.toAbsolutePath().normalize();
+                } else {
+                    throw new IllegalArgumentException("Repository path does not exist: " + repoPath);
+                }
+            }
         }
 
         try (Repository repository = openRepository(repoPath)) {
@@ -99,6 +143,11 @@ public class RepoAnalysisService {
 
             AnalysisResponse response = new AnalysisResponse(repoPath.toString(), commitsAnalyzed, fileRisks, insights);
             return response;
+        } finally {
+            // Clean up temporary clone if we created one
+            if (tempClonePath != null) {
+                deleteRecursively(tempClonePath);
+            }
         }
     }
 
@@ -321,6 +370,23 @@ public class RepoAnalysisService {
     private double round(double v, int decimals) {
         double factor = Math.pow(10, decimals);
         return Math.round(v * factor) / factor;
+    }
+
+    private void deleteRecursively(Path root) {
+        try {
+            if (!Files.exists(root)) {
+                return;
+            }
+            Files.walk(root)
+                    .sorted(Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException ignored) {
+                        }
+                    });
+        } catch (IOException ignored) {
+        }
     }
 
     private static class AstMetricsVisitor extends ASTVisitor {
