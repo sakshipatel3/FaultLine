@@ -44,3 +44,58 @@ FaultLine calculates a **Risk Score (0-100)** by analyzing two distinct data dim
 | 🟡 **MEDIUM** | Moderate churn or rising complexity. | Monitor for debt. |
 | 🔴 **HIGH** | "The FaultLine"—Frequent changes + Messy logic. | **Refactor ASAP.** |
 
+---
+
+## 🚀 Getting Started
+
+### 1. Backend (Spring Boot)
+
+- **Requirements**: Java 11+, Maven
+- **Build**:
+  - `mvn -B -DskipTests package`
+- **Run**:
+  - `java -jar target/repo-risk-analyzer-backend.jar`
+  - Backend will be available on `http://localhost:8080`
+
+Key endpoints:
+- `GET /api/health` – simple health check
+- `POST /api/analyze` – run analysis
+  - Body:
+    ```json
+    {
+      "repoPath": "/absolute/path/to/your/git/repo",
+      "maxCommits": 1000
+    }
+    ```
+
+### 2. Frontend (Seismic Risk Dashboard)
+
+The `frontend` folder contains a modern dashboard UI (Vite + React) for interacting with the backend.
+
+- **Install dependencies**:
+  - `cd frontend`
+  - `npm install`
+- **Run dev server**:
+  - `npm run dev`
+  - Open `http://localhost:5173`
+
+By default, the UI talks to `http://localhost:8080/api`. To point it somewhere else, create a `.env` file in `frontend` with:
+
+```bash
+VITE_API_BASE_URL=http://your-backend-host:8080/api
+```
+
+---
+
+## 🐳 Docker (Backend Only)
+
+To build and run the backend in Docker:
+
+```bash
+docker-compose build
+docker-compose up
+```
+
+This exposes the backend on `http://localhost:8080`.
+
+

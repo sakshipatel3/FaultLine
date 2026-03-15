@@ -1,10 +1,23 @@
 {
-  "name": "repo-risk-analyzer-frontend",
-  "version": "0.0.1",
-  "description": "Placeholder Angular frontend",
+  "name": "faultline-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FaultLine Seismic Risk Dashboard frontend",
   "scripts": {
-    "start": "echo \"Frontend"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.7.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react-swc": "^3.7.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0"
+  }
 }

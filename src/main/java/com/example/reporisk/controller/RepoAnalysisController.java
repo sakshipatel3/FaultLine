@@ -13,6 +13,7 @@ import javax.validation.Valid;
 @RestController
 @RequestMapping("/api")
 @Validated
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"}, allowCredentials = "false")
 public class RepoAnalysisController {
 
     private final RepoAnalysisService service;
