@@ -180,7 +180,23 @@
                 <ol class="fix-steps" *ngIf="!loadingSteps && !stepsError && fileSteps.length > 0">
                   <li *ngFor="let step of fileSteps">{{ stripStepNumber(step) }}</li>
                 </ol>
-                <p class="muted" *ngIf="!loadingSteps && !stepsError && fileSteps.length === 0">No steps returned. Check that LLM is configured.</p>
+                <div class="snippets-section" *ngIf="!loadingSteps && !stepsError && fileSnippets.length > 0">
+                  <h4 class="snippets-title">Suggested code changes</h4>
+                  <div class="snippet-card" *ngFor="let snip of fileSnippets">
+                    <p class="snippet-desc" *ngIf="snip.description">{{ snip.description }}</p>
+                    <div class="snippet-pair">
+                      <div class="snippet-block">
+                        <span class="snippet-label">Current</span>
+                        <pre class="snippet-code">{{ snip.current }}</pre>
+                      </div>
+                      <div class="snippet-block snippet-suggested">
+                        <span class="snippet-label">Suggested</span>
+                        <pre class="snippet-code">{{ snip.suggested }}</pre>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="muted" *ngIf="!loadingSteps && !stepsError && fileSteps.length === 0 && fileSnippets.length === 0">No steps returned. Check that LLM is configured.</p>
             </div>
           </div>
         </div>

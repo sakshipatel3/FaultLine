@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
-import { ApiService, AnalysisResponse, FileRisk } from './services/api.service';
+import { ApiService, AnalysisResponse, FileRisk, CodeSnippet } from './services/api.service';
+import { switchMap } from 'rxjs';
 
 @Component({
   selector: 'app-root',
@@ -14,6 +15,7 @@ export class AppComponent {
   data: AnalysisResponse | null = null;
   selectedFile: FileRisk | null = null;
   fileSteps: string[] = [];
+  fileSnippets: CodeSnippet[] = [];
   loadingSteps = false;
   stepsError: string | null = null;
 
@@ -51,27 +53,49 @@ export class AppComponent {
   onFileClick(file: FileRisk): void {
     this.selectedFile = file;
     this.fileSteps = [];
+    this.fileSnippets = [];
     this.stepsError = null;
     this.loadingSteps = true;
 
     const repoPath = this.data?.repositoryPath ?? '';
-    this.api.getFixSteps(repoPath, file).subscribe({
-      next: (res) => {
-        this.fileSteps = res?.steps ?? [];
-        this.loadingSteps = false;
-      },
-      error: (err) => {
-        const d = err?.error;
-        this.stepsError = typeof d === 'string' ? d : d?.message ?? err?.message ?? 'Could not load fix steps.';
-        this.fileSteps = [];
-        this.loadingSteps = false;
-      },
-    });
+    this.api
+      .getFileContent(repoPath, file.path)
+      .pipe(
+        switchMap((fc) =>
+          this.api.getFixSteps(repoPath, file, fc?.content?.trim() || null)
+        )
+      )
+      .subscribe({
+        next: (res) => {
+          this.fileSteps = res?.steps ?? [];
+          this.fileSnippets = res?.snippets ?? [];
+          this.loadingSteps = false;
+        },
+        error: () => {
+          this.api.getFixSteps(repoPath, file, null).subscribe({
+            next: (res) => {
+              this.fileSteps = res?.steps ?? [];
+              this.fileSnippets = res?.snippets ?? [];
+              this.loadingSteps = false;
+            },
+            error: (e) => this.setStepsError(e),
+          });
+        },
+      });
+  }
+
+  private setStepsError(err: any): void {
+    const d = err?.error;
+    this.stepsError = typeof d === 'string' ? d : d?.message ?? err?.message ?? 'Could not load fix steps.';
+    this.fileSteps = [];
+    this.fileSnippets = [];
+    this.loadingSteps = false;
   }
 
   backToInsights(): void {
     this.selectedFile = null;
     this.fileSteps = [];
+    this.fileSnippets = [];
     this.stepsError = null;
   }
 

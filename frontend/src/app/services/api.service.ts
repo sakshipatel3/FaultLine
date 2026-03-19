@@ -18,8 +18,15 @@ export interface AnalysisResponse {
   insights: string[];
 }
 
+export interface CodeSnippet {
+  description: string;
+  current: string;
+  suggested: string;
+}
+
 export interface FixStepsResponse {
   steps: string[];
+  snippets?: CodeSnippet[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -35,8 +42,17 @@ export class ApiService {
     });
   }
 
-  getFixSteps(repositoryPath: string, file: FileRisk): Observable<FixStepsResponse> {
-    return this.http.post<FixStepsResponse>(`${this.apiBase}/insights/file`, {
+  getFileContent(repositoryPath: string, filePath: string): Observable<{ content: string }> {
+    const params = { repositoryPath, filePath };
+    return this.http.get<{ content: string }>(`${this.apiBase}/file-content`, { params });
+  }
+
+  getFixSteps(
+    repositoryPath: string,
+    file: FileRisk,
+    fileContent?: string | null
+  ): Observable<FixStepsResponse> {
+    const body: Record<string, unknown> = {
       repositoryPath,
       file: {
         path: file.path,
@@ -46,6 +62,10 @@ export class ApiService {
         churnLines: file.churnLines,
         astSizeScore: file.astSizeScore,
       },
-    });
+    };
+    if (fileContent != null && fileContent.trim() !== '') {
+      body['fileContent'] = fileContent;
+    }
+    return this.http.post<FixStepsResponse>(`${this.apiBase}/insights/file`, body);
   }
 }

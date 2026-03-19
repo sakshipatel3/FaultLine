@@ -141,7 +141,7 @@ public class RepoAnalysisService {
                 insights = generateInsights(fileRisks);
             }
 
-            AnalysisResponse response = new AnalysisResponse(repoPath.toString(), commitsAnalyzed, fileRisks, insights);
+            AnalysisResponse response = new AnalysisResponse(input, commitsAnalyzed, fileRisks, insights);
             return response;
         } finally {
             // Clean up temporary clone if we created one
@@ -365,6 +365,85 @@ public class RepoAnalysisService {
         insights.add("  - Investigate files with many contributors to improve ownership or documentation.");
 
         return insights;
+    }
+
+    /**
+     * Resolve repository path (clone if URL, else use local path).
+     * Returns (repoPath, tempClonePath or null). Caller must delete tempClonePath if non-null.
+     */
+    public static class ResolvedRepo {
+        public final Path repoPath;
+        public final Path tempClonePath;
+
+        public ResolvedRepo(Path repoPath, Path tempClonePath) {
+            this.repoPath = repoPath;
+            this.tempClonePath = tempClonePath;
+        }
+    }
+
+    public ResolvedRepo resolveRepository(String input) throws IOException {
+        if (input == null || input.isBlank()) {
+            throw new IllegalArgumentException("Repository path is required.");
+        }
+        String trimmed = input.trim();
+        boolean looksLikeRemote = trimmed.contains("://") || trimmed.startsWith("git@")
+                || trimmed.contains("github.com") || trimmed.endsWith(".git");
+        if (looksLikeRemote) {
+            Path temp = Files.createTempDirectory("faultline-clone-");
+            try (Git ignored = Git.cloneRepository()
+                    .setURI(trimmed)
+                    .setDirectory(temp.toFile())
+                    .setCloneAllBranches(true)
+                    .call()) {
+            }
+            return new ResolvedRepo(temp.toAbsolutePath().normalize(), temp);
+        }
+        Path repo = Paths.get(trimmed).toAbsolutePath().normalize();
+        if (!Files.exists(repo) && (trimmed.startsWith("http") || trimmed.contains("github.com"))) {
+            Path temp = Files.createTempDirectory("faultline-clone-");
+            try (Git ignored = Git.cloneRepository()
+                    .setURI(trimmed)
+                    .setDirectory(temp.toFile())
+                    .setCloneAllBranches(true)
+                    .call()) {
+            }
+            return new ResolvedRepo(temp.toAbsolutePath().normalize(), temp);
+        }
+        return new ResolvedRepo(repo, null);
+    }
+
+    private static final int MAX_FILE_CONTENT_LENGTH = 15_000;
+
+    /**
+     * Read file content from a repository (clone if URL). Returns null if file not found or not readable.
+     */
+    public String getFileContent(String repositoryPath, String filePath) {
+        if (repositoryPath == null || filePath == null || filePath.isBlank()) {
+            return null;
+        }
+        ResolvedRepo resolved;
+        try {
+            resolved = resolveRepository(repositoryPath);
+        } catch (Exception e) {
+            return null;
+        }
+        try {
+            Path fullPath = resolved.repoPath.resolve(filePath).normalize();
+            if (!fullPath.startsWith(resolved.repoPath) || !Files.isRegularFile(fullPath)) {
+                return null;
+            }
+            String content = Files.readString(fullPath, StandardCharsets.UTF_8);
+            if (content.length() > MAX_FILE_CONTENT_LENGTH) {
+                content = content.substring(0, MAX_FILE_CONTENT_LENGTH) + "\n\n... (truncated)";
+            }
+            return content;
+        } catch (IOException e) {
+            return null;
+        } finally {
+            if (resolved.tempClonePath != null) {
+                deleteRecursively(resolved.tempClonePath);
+            }
+        }
     }
 
     private double round(double v, int decimals) {

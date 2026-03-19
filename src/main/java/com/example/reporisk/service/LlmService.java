@@ -25,6 +25,34 @@ public class LlmService {
 
     private static final Logger log = LoggerFactory.getLogger(LlmService.class);
     private static final Pattern NUMBERED_STEP = Pattern.compile("\\s*\\d+\\.\\s*");
+    private static final int MAX_FILE_CONTENT_FOR_LLM = 8_000;
+
+    public static final class CodeSnippet {
+        private final String description;
+        private final String current;
+        private final String suggested;
+
+        public CodeSnippet(String description, String current, String suggested) {
+            this.description = description != null ? description : "";
+            this.current = current != null ? current : "";
+            this.suggested = suggested != null ? suggested : "";
+        }
+        public String getDescription() { return description; }
+        public String getCurrent() { return current; }
+        public String getSuggested() { return suggested; }
+    }
+
+    public static final class FixStepsResult {
+        private final List<String> steps;
+        private final List<CodeSnippet> snippets;
+
+        public FixStepsResult(List<String> steps, List<CodeSnippet> snippets) {
+            this.steps = steps != null ? steps : Collections.emptyList();
+            this.snippets = snippets != null ? snippets : Collections.emptyList();
+        }
+        public List<String> getSteps() { return steps; }
+        public List<CodeSnippet> getSnippets() { return snippets; }
+    }
 
     private final WebClient webClient;
     private final String apiUrl;
@@ -245,6 +273,85 @@ public class LlmService {
             }
             log.warn("LLM call failed", e);
             throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Generate fix steps and optional code snippets. When file content is provided, steps come from
+     * the existing flow and snippets from a dedicated second LLM call (simpler prompt = better JSON).
+     */
+    public FixStepsResult generateFixStepsWithSnippets(FileRisk file, String repositoryPath, String fileContent) {
+        List<String> steps = generateFixSteps(file, repositoryPath);
+        if (fileContent == null || fileContent.isBlank()) {
+            return new FixStepsResult(steps, Collections.emptyList());
+        }
+        List<CodeSnippet> snippets = fetchSnippetsOnly(file.getPath(), fileContent);
+        return new FixStepsResult(steps, snippets);
+    }
+
+    /**
+     * Single-purpose LLM call: return a JSON array of { description, current, suggested } for refactoring the given code.
+     */
+    private List<CodeSnippet> fetchSnippetsOnly(String filePath, String fileContent) {
+        String truncated = fileContent.length() > MAX_FILE_CONTENT_FOR_LLM
+                ? fileContent.substring(0, MAX_FILE_CONTENT_FOR_LLM) + "\n\n... (truncated)"
+                : fileContent;
+        String userPrompt = String.format(
+                "File: %s\n\nJava code:\n```java\n%s\n```\n\n"
+                + "Suggest 1 to 3 small refactors. Reply with ONLY a JSON array, no other text. Each element: {\"description\": \"what to change\", \"current\": \"exact code to replace\", \"suggested\": \"replacement code\"}. Keep each current/suggested under 15 lines.",
+                filePath, truncated
+        );
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", model);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", "You output only a JSON array. No markdown, no code fence, no explanation. Array of objects with keys: description, current, suggested."),
+                Map.of("role", "user", "content", userPrompt)
+        ));
+        body.put("temperature", 0.2);
+
+        try {
+            String respBody = webClient.post()
+                    .uri(apiUrl)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .bodyValue(body)
+                    .retrieve()
+                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(b -> (Throwable) new RuntimeException(extractErrorMessage(b))))
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(30))
+                    .block();
+            if (respBody == null || respBody.isBlank()) return Collections.emptyList();
+
+            JsonNode root = mapper.readTree(respBody);
+            JsonNode choices = root.path("choices");
+            if (!choices.isArray() || choices.size() == 0) return Collections.emptyList();
+            String content = extractMessageContent(choices.get(0).path("message"), choices.get(0));
+            if (content == null) content = "";
+            String cleaned = content.trim().replaceAll("^```(?:json)?\\s*", "").replaceAll("\\s*```$", "").trim();
+            if (cleaned.isEmpty()) return Collections.emptyList();
+
+            JsonNode arr = mapper.readTree(cleaned);
+            if (!arr.isArray()) {
+                JsonNode snippetsNode = arr.path("snippets");
+                if (snippetsNode.isArray()) arr = snippetsNode;
+                else return Collections.emptyList();
+            }
+            List<CodeSnippet> list = new ArrayList<>();
+            for (JsonNode obj : arr) {
+                String desc = obj.path("description").asText("");
+                String cur = obj.path("current").asText("");
+                String sug = obj.path("suggested").asText("");
+                if (!cur.isEmpty() || !sug.isEmpty()) {
+                    list.add(new CodeSnippet(desc, cur, sug));
+                }
+            }
+            log.info("Fetched {} code snippet(s) for {}", list.size(), filePath);
+            return list;
+        } catch (Exception e) {
+            log.warn("Snippets LLM call failed (steps still returned): {}", e.getMessage());
+            return Collections.emptyList();
         }
     }
 

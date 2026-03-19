@@ -5,6 +5,8 @@ import com.example.reporisk.model.AnalysisResponse;
 import com.example.reporisk.model.FileRisk;
 import com.example.reporisk.service.LlmService;
 import com.example.reporisk.service.RepoAnalysisService;
+
+import java.util.Collections;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -26,6 +28,21 @@ public class RepoAnalysisController {
     public RepoAnalysisController(RepoAnalysisService service, LlmService llmService) {
         this.service = service;
         this.llmService = llmService;
+    }
+
+    /**
+     * Get raw file content from the repository (for code snippets).
+     * GET /api/file-content?repositoryPath=...&filePath=...
+     */
+    @GetMapping("/file-content")
+    public ResponseEntity<?> getFileContent(
+            @RequestParam String repositoryPath,
+            @RequestParam String filePath) {
+        String content = service.getFileContent(repositoryPath, filePath);
+        if (content == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Collections.singletonMap("content", content));
     }
 
     /**
@@ -73,9 +90,9 @@ public class RepoAnalysisController {
     }
 
     /**
-     * Get AI-generated fix steps for a single file (from the analysis result).
-     * Body: { "repositoryPath": "...", "file": { "path", "riskScore", "modifications", "contributors", "churnLines", "astSizeScore" } }
-     * Returns: { "steps": ["1. ...", "2. ..."] } or 503 if LLM is not configured.
+     * Get AI-generated fix steps and optional code snippets (current vs suggested) for a single file.
+     * Body: { "repositoryPath": "...", "file": { ... }, "fileContent": "optional raw file content" }
+     * Returns: { "steps": ["1. ...", ...], "snippets": [ { "description", "current", "suggested" }, ... ] }
      */
     @PostMapping("/insights/file")
     public ResponseEntity<?> getFixStepsForFile(@RequestBody Map<String, Object> body) {
@@ -84,6 +101,10 @@ public class RepoAnalysisController {
                     .body("AI insights are not configured. Set LLM_API_URL and LLM_API_KEY.");
         }
         String repositoryPath = body.get("repositoryPath") != null ? body.get("repositoryPath").toString() : "";
+        Object fileContentObj = body.get("fileContent");
+        String fileContent = fileContentObj != null ? fileContentObj.toString() : null;
+        if (fileContent != null && fileContent.isBlank()) fileContent = null;
+
         @SuppressWarnings("unchecked")
         Map<String, Object> fileMap = (Map<String, Object>) body.get("file");
         if (fileMap == null) {
@@ -97,8 +118,16 @@ public class RepoAnalysisController {
         file.setChurnLines(getInt(fileMap, "churnLines"));
         file.setAstSizeScore(getDouble(fileMap, "astSizeScore"));
         try {
-            List<String> steps = llmService.generateFixSteps(file, repositoryPath);
-            return ResponseEntity.ok(Map.of("steps", steps));
+            LlmService.FixStepsResult result = llmService.generateFixStepsWithSnippets(file, repositoryPath, fileContent);
+            List<Map<String, String>> snippetsJson = new java.util.ArrayList<>();
+            for (LlmService.CodeSnippet s : result.getSnippets()) {
+                snippetsJson.add(Map.of(
+                        "description", s.getDescription(),
+                        "current", s.getCurrent(),
+                        "suggested", s.getSuggested()
+                ));
+            }
+            return ResponseEntity.ok(Map.of("steps", result.getSteps(), "snippets", snippetsJson));
         } catch (RuntimeException e) {
             String msg = e.getMessage() != null ? e.getMessage() : "LLM failed";
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(msg);
