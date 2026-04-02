@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,15 +57,120 @@ public class LlmService {
     private final String apiUrl;
     private final String apiKey;
     private final String model;
+    /** openai = OpenAI-compatible chat; huggingface = HF Inference API (transformer text-generation). */
+    private final String provider;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public LlmService(@Value("${llm.api.url:}") String apiUrl,
                       @Value("${llm.api.key:}") String apiKey,
-                      @Value("${llm.model:gpt-3.5-turbo}") String model) {
+                      @Value("${llm.model:gpt-3.5-turbo}") String model,
+                      @Value("${llm.provider:openai}") String provider) {
         this.apiUrl = apiUrl == null ? "" : apiUrl.trim();
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.model = model == null ? "gpt-3.5-turbo" : model.trim();
+        this.provider = provider == null ? "openai" : provider.trim();
         this.webClient = WebClient.builder().build();
+    }
+
+    private boolean useHuggingface() {
+        String p = provider.toLowerCase(Locale.ROOT);
+        return "huggingface".equals(p) || "hf".equals(p) || "transformers".equals(p);
+    }
+
+    private Map<String, Object> buildOpenAiBody(String system, String user, double temperature) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", model);
+        List<Map<String, String>> messages = new ArrayList<>();
+        if (system != null && !system.isBlank()) {
+            messages.add(Map.of("role", "system", "content", system));
+        }
+        messages.add(Map.of("role", "user", "content", user == null ? "" : user));
+        body.put("messages", messages);
+        body.put("temperature", temperature);
+        return body;
+    }
+
+    private Map<String, Object> buildHuggingfaceBody(String system, String user, double temperature, int maxNewTokens) {
+        String combined = hfCombinedPrompt(system, user);
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("max_new_tokens", maxNewTokens);
+        parameters.put("temperature", temperature);
+        parameters.put("return_full_text", false);
+        Map<String, Object> body = new HashMap<>();
+        body.put("inputs", combined);
+        body.put("parameters", parameters);
+        return body;
+    }
+
+    private static String hfCombinedPrompt(String system, String user) {
+        String s = system == null ? "" : system.trim();
+        String u = user == null ? "" : user.trim();
+        if (s.isEmpty()) return u;
+        if (u.isEmpty()) return s;
+        return s + "\n\n" + u;
+    }
+
+    private String postLlm(Object body, Duration timeout) {
+        return webClient.post()
+                .uri(apiUrl)
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
+                        res -> res.bodyToMono(String.class)
+                                .map(b -> (Throwable) new RuntimeException(extractErrorMessage(b))))
+                .bodyToMono(String.class)
+                .timeout(timeout)
+                .block();
+    }
+
+    /**
+     * Single completion: OpenAI-style chat or Hugging Face text-generation, depending on {@code llm.provider}.
+     */
+    private String completeChat(String systemPrompt, String userPrompt, double temperature,
+                                Duration timeout, int huggingFaceMaxNewTokens) throws Exception {
+        String respBody;
+        if (useHuggingface()) {
+            respBody = postLlm(buildHuggingfaceBody(systemPrompt, userPrompt, temperature, huggingFaceMaxNewTokens), timeout);
+            return parseHuggingfaceAssistantText(respBody);
+        }
+        respBody = postLlm(buildOpenAiBody(systemPrompt, userPrompt, temperature), timeout);
+        return extractOpenAiAssistantText(respBody);
+    }
+
+    private String extractOpenAiAssistantText(String respBody) throws Exception {
+        if (respBody == null || respBody.isBlank()) return "";
+        JsonNode root = mapper.readTree(respBody);
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray() || choices.size() == 0) return "";
+        JsonNode message = choices.get(0).path("message");
+        String content = extractMessageContent(message, choices.get(0));
+        return content != null ? content.trim() : "";
+    }
+
+    private String parseHuggingfaceAssistantText(String respBody) throws Exception {
+        if (respBody == null || respBody.isBlank()) return "";
+        JsonNode root = mapper.readTree(respBody);
+        if (root.has("error")) {
+            JsonNode err = root.get("error");
+            String msg = err.isTextual() ? err.asText() : err.toString();
+            throw new RuntimeException(msg);
+        }
+        String text = extractHfGeneratedText(root);
+        return text != null ? text.trim() : "";
+    }
+
+    private String extractHfGeneratedText(JsonNode node) {
+        if (node == null || node.isNull()) return "";
+        if (node.isArray()) {
+            if (node.size() == 0) return "";
+            return extractHfGeneratedText(node.get(0));
+        }
+        if (node.isObject() && node.has("generated_text")) {
+            return node.path("generated_text").asText("");
+        }
+        return "";
     }
 
     public boolean isEnabled() {
@@ -77,36 +181,11 @@ public class LlmService {
      * Call the LLM with a minimal prompt to verify URL + key work. Returns 200 with message or 502 with error.
      */
     public ResponseEntity<?> testConnection() {
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", model);
-        body.put("messages", List.of(
-                Map.of("role", "user", "content", "Reply with exactly: OK")
-        ));
-        body.put("temperature", 0);
         try {
-            String respBody = webClient.post()
-                    .uri(apiUrl)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .bodyValue(body)
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                            res -> res.bodyToMono(String.class)
-                                    .map(b -> (Throwable) new RuntimeException(extractErrorMessage(b))))
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(15))
-                    .block();
-            if (respBody == null || respBody.isBlank()) {
+            String content = completeChat("", "Reply with exactly: OK", 0, Duration.ofSeconds(15), 32);
+            if (content.isBlank()) {
                 return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("ok", false, "message", "Empty response from LLM"));
             }
-            JsonNode root = mapper.readTree(respBody);
-            JsonNode choices = root.path("choices");
-            if (!choices.isArray() || choices.size() == 0) {
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("ok", false, "message", "No choices in response", "raw", respBody.substring(0, Math.min(300, respBody.length()))));
-            }
-            JsonNode message = choices.get(0).path("message");
-            String content = extractMessageContent(message, choices.get(0));
-            if (content == null) content = "";
             log.info("LLM test connection OK: {}", content.trim());
             return ResponseEntity.ok(Map.of("ok", true, "message", "LLM connected", "reply", content.trim()));
         } catch (Exception e) {
@@ -122,45 +201,13 @@ public class LlmService {
         }
 
         String prompt = buildPrompt(topFiles);
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", model);
-        List<Map<String, String>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content",
-                "You are an expert Java engineer who explains things in simple, clear language. " +
-                        "For each file you see, summarize why it is risky and give 2-4 short, concrete suggestions. " +
-                        "Avoid jargon; write as if to a competent developer who is new to the codebase."));
-        messages.add(Map.of("role", "user", "content", prompt));
-        body.put("messages", messages);
-        body.put("temperature", 0.2);
+        String system = "You are an expert Java engineer who explains things in simple, clear language. " +
+                "For each file you see, summarize why it is risky and give 2-4 short, concrete suggestions. " +
+                "Avoid jargon; write as if to a competent developer who is new to the codebase.";
 
         try {
-            Mono<String> respMono = webClient.post()
-                    .uri(apiUrl)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .bodyValue(body)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(20));
-
-            String respBody = respMono.block();
-            if (respBody == null || respBody.isBlank()) {
-                return Collections.emptyList();
-            }
-
-            JsonNode root = mapper.readTree(respBody);
-            JsonNode choices = root.path("choices");
-            if (!choices.isArray() || choices.size() == 0) {
-                return Collections.emptyList();
-            }
-            JsonNode message = choices.get(0).path("message");
-            String content = message.path("content").asText("");
-            if (content.isBlank()) {
-                content = choices.get(0).path("text").asText("");
-            }
+            String content = completeChat(system, prompt, 0.2, Duration.ofSeconds(20), 2048);
             if (content.isBlank()) return Collections.emptyList();
-
             return Arrays.stream(content.split("\\r?\\n"))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
@@ -207,46 +254,13 @@ public class LlmService {
                 file.getAstSizeScore()
         );
 
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", model);
-        List<Map<String, String>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content",
-                "You are a helpful coding assistant. Reply only with numbered steps to fix the given file. Use simple, clear language. No markdown, no extra text."));
-        messages.add(Map.of("role", "user", "content", prompt));
-        body.put("messages", messages);
-        body.put("temperature", 0.3);
+        String system = "You are a helpful coding assistant. Reply only with numbered steps to fix the given file. Use simple, clear language. No markdown, no extra text.";
 
-        log.info("Calling LLM for fix steps (model={}, file={})", model, file.getPath());
+        log.info("Calling LLM for fix steps (provider={}, model={}, file={})", provider, model, file.getPath());
         try {
-            String respBody = webClient.post()
-                    .uri(apiUrl)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .bodyValue(body)
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                            res -> res.bodyToMono(String.class)
-                                    .map(b -> (Throwable) new RuntimeException("LLM API error " + res.statusCode() + ": " + extractErrorMessage(b))))
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(30))
-                    .block();
-
-            if (respBody == null || respBody.isBlank()) {
-                throw new RuntimeException("LLM returned an empty response.");
-            }
-
-            JsonNode root = mapper.readTree(respBody);
-            JsonNode choices = root.path("choices");
-            if (!choices.isArray() || choices.size() == 0) {
-                log.debug("LLM response: choices missing or empty. Raw (first 500 chars): {}", respBody.length() > 500 ? respBody.substring(0, 500) + "…" : respBody);
-                throw new RuntimeException("LLM response had no choices. Check the API response format.");
-            }
-            JsonNode message = choices.get(0).path("message");
-            String content = extractMessageContent(message, choices.get(0));
-            if (content == null) content = "";
-            content = content.trim();
+            String content = completeChat(system, prompt, 0.3, Duration.ofSeconds(30), 1024);
             if (content.isBlank()) {
-                log.debug("LLM response: message content empty. message node: {}", message);
+                log.debug("LLM response: empty assistant text");
                 throw new RuntimeException("LLM returned no text in the response.");
             }
             log.debug("LLM returned {} chars of content.", content.length());
@@ -301,34 +315,11 @@ public class LlmService {
                 + "Suggest 1 to 3 small refactors. Reply with ONLY a JSON array, no other text. Each element: {\"description\": \"what to change\", \"current\": \"exact code to replace\", \"suggested\": \"replacement code\"}. Keep each current/suggested under 15 lines.",
                 filePath, truncated
         );
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", model);
-        body.put("messages", List.of(
-                Map.of("role", "system", "content", "You output only a JSON array. No markdown, no code fence, no explanation. Array of objects with keys: description, current, suggested."),
-                Map.of("role", "user", "content", userPrompt)
-        ));
-        body.put("temperature", 0.2);
+        String system = "You output only a JSON array. No markdown, no code fence, no explanation. Array of objects with keys: description, current, suggested.";
 
         try {
-            String respBody = webClient.post()
-                    .uri(apiUrl)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .bodyValue(body)
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                            res -> res.bodyToMono(String.class)
-                                    .map(b -> (Throwable) new RuntimeException(extractErrorMessage(b))))
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(30))
-                    .block();
-            if (respBody == null || respBody.isBlank()) return Collections.emptyList();
-
-            JsonNode root = mapper.readTree(respBody);
-            JsonNode choices = root.path("choices");
-            if (!choices.isArray() || choices.size() == 0) return Collections.emptyList();
-            String content = extractMessageContent(choices.get(0).path("message"), choices.get(0));
-            if (content == null) content = "";
+            String content = completeChat(system, userPrompt, 0.2, Duration.ofSeconds(30), 2048);
+            if (content.isBlank()) return Collections.emptyList();
             String cleaned = content.trim().replaceAll("^```(?:json)?\\s*", "").replaceAll("\\s*```$", "").trim();
             if (cleaned.isEmpty()) return Collections.emptyList();
 

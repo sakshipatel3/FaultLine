@@ -46,6 +46,7 @@ public class RepoRiskAnalyzerApplication {
             applyIfSet("LLM_API_URL", dotenv.get("LLM_API_URL"));
             applyIfSet("LLM_API_KEY", dotenv.get("LLM_API_KEY"));
             applyIfSet("LLM_MODEL", dotenv.get("LLM_MODEL"));
+            applyIfSet("LLM_PROVIDER", dotenv.get("LLM_PROVIDER"));
         } catch (Exception ignored) {
         }
     }
