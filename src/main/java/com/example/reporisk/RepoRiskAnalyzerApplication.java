@@ -24,7 +24,12 @@ public class RepoRiskAnalyzerApplication {
         boolean llmUrlSet = nonEmpty(System.getProperty("LLM_API_URL"));
         boolean llmKeySet = nonEmpty(System.getProperty("LLM_API_KEY"));
         if (llmUrlSet && llmKeySet) {
-            System.out.println("[FaultLine] LLM configured: yes (AI fix steps enabled)");
+            String prov = System.getProperty("LLM_PROVIDER");
+            if (nonEmpty(prov)) {
+                System.out.println("[FaultLine] LLM configured: yes (provider=" + prov.trim() + ")");
+            } else {
+                System.out.println("[FaultLine] LLM configured: yes (AI fix steps enabled; default provider=openai)");
+            }
         } else {
             System.out.println("[FaultLine] LLM configured: no. Edit .env in project root, set LLM_API_KEY=sk-your-key, then restart.");
             System.out.println("[FaultLine] Looked for .env in: " + cwd + (parent != null ? ", " + parent : ""));

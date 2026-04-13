@@ -5,6 +5,7 @@ import com.example.reporisk.model.AnalysisResponse;
 import com.example.reporisk.model.FileRisk;
 import org.eclipse.jdt.core.dom.*;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.diff.Edit;
@@ -390,26 +391,27 @@ public class RepoAnalysisService {
                 || trimmed.contains("github.com") || trimmed.endsWith(".git");
         if (looksLikeRemote) {
             Path temp = Files.createTempDirectory("faultline-clone-");
-            try (Git ignored = Git.cloneRepository()
-                    .setURI(trimmed)
-                    .setDirectory(temp.toFile())
-                    .setCloneAllBranches(true)
-                    .call()) {
-            }
+            cloneRepositoryTo(temp, trimmed);
             return new ResolvedRepo(temp.toAbsolutePath().normalize(), temp);
         }
         Path repo = Paths.get(trimmed).toAbsolutePath().normalize();
         if (!Files.exists(repo) && (trimmed.startsWith("http") || trimmed.contains("github.com"))) {
             Path temp = Files.createTempDirectory("faultline-clone-");
-            try (Git ignored = Git.cloneRepository()
-                    .setURI(trimmed)
-                    .setDirectory(temp.toFile())
-                    .setCloneAllBranches(true)
-                    .call()) {
-            }
+            cloneRepositoryTo(temp, trimmed);
             return new ResolvedRepo(temp.toAbsolutePath().normalize(), temp);
         }
         return new ResolvedRepo(repo, null);
+    }
+
+    private static void cloneRepositoryTo(Path directory, String uri) throws IOException {
+        try (Git ignored = Git.cloneRepository()
+                .setURI(uri)
+                .setDirectory(directory.toFile())
+                .setCloneAllBranches(true)
+                .call()) {
+        } catch (GitAPIException e) {
+            throw new IOException("Git clone failed: " + uri, e);
+        }
     }
 
     private static final int MAX_FILE_CONTENT_LENGTH = 15_000;
