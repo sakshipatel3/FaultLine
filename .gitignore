@@ -1,4 +1,8 @@
 .DS_Store
+
+# Local secrets — never commit real keys (use .env.example only)
+.env
+
 node_modules/
 dist/
 target/

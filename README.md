@@ -52,7 +52,7 @@ Follow these steps to run FaultLine locally (backend + frontend).
 
 ### Prerequisites
 
-- **Java 17** (required for the backend). Check with `java -version`.
+- **Java 17+** (required to **run** the backend JAR). Check with `java -version`. Maven may use a newer JDK than the `java` on your `PATH` (for example, macOS Homebrew’s Java 11); if `java -jar …` fails with `UnsupportedClassVersionError`, use **`./scripts/run-backend.sh`** after building, or point **`JAVA_HOME`** at a JDK 17+ install and run `java` from there.
 - **Maven 3.6+** (to build the backend). Check with `mvn -v`.
 - **Node.js 18+** and **npm** (for the frontend). Check with `node -v` and `npm -v`.
 
@@ -81,6 +81,14 @@ From the **project root** (the `FaultLine` folder):
 
 ```bash
 mvn -B -DskipTests package
+./scripts/run-backend.sh
+```
+
+On **macOS**, `./scripts/run-backend.sh` picks a JDK **17+** via `/usr/libexec/java_home`, so the app runs even when `java` on your `PATH` is older.
+
+Alternatively, if `java -version` already reports **17 or higher**, you can run the JAR directly:
+
+```bash
 java -jar target/repo-risk-analyzer-backend.jar
 ```
 
